@@ -1,6 +1,7 @@
 import pymongo
 import paho.mqtt.client as mqtt
 import json
+import time
 
 # Configuración de MongoDB
 MONGO_URI = "mongodb://sunset:1234@144.22.36.59:27017/sunset"
@@ -8,22 +9,25 @@ DATABASE_NAME = "sunset"
 COLLECTION_NAME = "historial_acceso"
 
 # Configuración de MQTT
-MQTT_BROKER = "broker.hivemq.com"  # Reemplaza con la dirección de tu broker
+MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
-MQTT_TOPIC = "jose_univalle/puerta"  # Reemplaza con tu tópico
+MQTT_TOPIC = "tu/topic/acceso"  # Ajusta este tópico según tus necesidades
 
 # Cliente MongoDB
 client = pymongo.MongoClient(MONGO_URI)
 db = client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-# Función para obtener datos de MongoDB
-def obtener_datos():
-    # Aquí puedes realizar tu consulta a MongoDB
-    documentos = collection.find().limit(1)  # Obtener el último documento como ejemplo
-    for doc in documentos:
-        return doc
-    return None
+# Función para obtener los últimos registros de acceso
+def obtener_ultimos_accesos():
+    try:
+        ultimo_registro = collection.find().sort("dateTime", -1).limit(1)
+        return list(ultimo_registro)[0]
+    except IndexError:
+        return None
+    except Exception as e:
+        print(f"Error al obtener datos de MongoDB: {e}")
+        return None
 
 # Funciones de callback para MQTT
 def on_connect(client, userdata, flags, rc):
@@ -39,16 +43,23 @@ mqtt_client.on_publish = on_publish
 
 # Conectar al broker MQTT
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+mqtt_client.loop_start()
 
-# Obtener datos de MongoDB
-datos = obtener_datos()
-if datos:
-    # Publicar datos en el tópico MQTT
-    mensaje = json.dumps(datos)  # Convertir el documento a JSON
-    mqtt_client.publish(MQTT_TOPIC, mensaje)
+try:
+    while True:
+        # Obtener el último registro de acceso
+        datos = obtener_ultimos_accesos()
+        if datos:
+            # Publicar datos en el tópico MQTT
+            mensaje = json.dumps(datos, default=str)  # Convertir a JSON
+            mqtt_client.publish(MQTT_TOPIC, mensaje)
 
-# Desconectar el cliente MQTT
-mqtt_client.disconnect()
+        time.sleep(2)  
+except KeyboardInterrupt:
+    print("Deteniendo el script...")
 
-# Cerrar la conexión MongoDB
-client.close()
+finally:
+    # Desconectar el cliente MQTT y cerrar conexión MongoDB
+    mqtt_client.loop_stop()
+    mqtt_client.disconnect()
+    client.close()
