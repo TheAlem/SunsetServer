@@ -11,23 +11,27 @@ COLLECTION_NAME = "historial_acceso"
 # Configuración de MQTT
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
-MQTT_TOPIC = "tu/topic/acceso"  # Ajusta este tópico según tus necesidades
+# Tópicos para cada tipo de dispositivo
+TOPICOS = {
+    "puerta": "jose_univalle/puerta",
+    "persianas": "jose_univalle/persianas",
+    "iluminacion": "jose_univalle/prueba",
+    "ventana": "jose_univalle/ventana"
+}
 
 # Cliente MongoDB
 client = pymongo.MongoClient(MONGO_URI)
 db = client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-# Función para obtener los últimos registros de acceso
-def obtener_ultimos_accesos():
+# Función para obtener los últimos registros por tipo de dispositivo
+def obtener_ultimos_registros(tipo_dispositivo, limit=5):
     try:
-        ultimo_registro = collection.find().sort("dateTime", -1).limit(1)
-        return list(ultimo_registro)[0]
-    except IndexError:
-        return None
+        registros = collection.find({'tipo_dispositivo': tipo_dispositivo}).sort("dateTime", -1).limit(limit)
+        return list(registros)
     except Exception as e:
-        print(f"Error al obtener datos de MongoDB: {e}")
-        return None
+        print(f"Error al obtener datos de MongoDB para {tipo_dispositivo}: {e}")
+        return []
 
 # Funciones de callback para MQTT
 def on_connect(client, userdata, flags, rc):
@@ -47,19 +51,16 @@ mqtt_client.loop_start()
 
 try:
     while True:
-        # Obtener el último registro de acceso
-        datos = obtener_ultimos_accesos()
-        if datos:
-            # Publicar datos en el tópico MQTT
-            mensaje = json.dumps(datos, default=str)  # Convertir a JSON
-            mqtt_client.publish(MQTT_TOPIC, mensaje)
-
-        time.sleep(2)  
+        for tipo_dispositivo, topico in TOPICOS.items():
+            registros = obtener_ultimos_registros(tipo_dispositivo)
+            for registro in registros:
+                mensaje = json.dumps(registro, default=str)
+                mqtt_client.publish(topico, mensaje)
+        time.sleep(10)  # Intervalo de tiempo entre cada envío de datos
 except KeyboardInterrupt:
     print("Deteniendo el script...")
 
 finally:
-    # Desconectar el cliente MQTT y cerrar conexión MongoDB
     mqtt_client.loop_stop()
     mqtt_client.disconnect()
     client.close()
