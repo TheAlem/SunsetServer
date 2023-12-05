@@ -11,11 +11,10 @@ COLLECTION_NAME = "historial_acceso"
 # Configuración de MQTT
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
-# Tópicos para cada tipo de dispositivo
 TOPICOS = {
     "puerta": "jose_univalle/puerta",
     "persianas": "jose_univalle/persianas",
-    "iluminacion": "jose_univalle/prueba",
+    "iluminacion": "jose_univalle/iluminacion",
     "ventana": "jose_univalle/ventana"
 }
 
@@ -36,14 +35,33 @@ def obtener_ultimos_registros(tipo_dispositivo, limit=5):
 # Funciones de callback para MQTT
 def on_connect(client, userdata, flags, rc):
     print(f"Conectado a MQTT con el código de resultado {rc}")
+    for topico in TOPICOS.values():
+        client.subscribe(topico)
 
-def on_publish(client, userdata, mid):
-    print(f"Mensaje {mid} publicado")
+def on_message(client, userdata, message):
+    try:
+        mensaje_decodificado = str(message.payload.decode("utf-8","ignore"))
+        data = json.loads(mensaje_decodificado)
+        tipo_dispositivo = message.topic.split('/')[-1]
+        data['tipo_dispositivo'] = tipo_dispositivo
+
+        # Lógica específica para cada tópico
+        if tipo_dispositivo == 'iluminacion':
+            # Suponiendo que 'valor' es el campo en el mensaje para intensidad de iluminación
+            data['intensidad'] = int(data['valor'])
+        else:
+            # Para otros tópicos que solo manejan encendido/apagado (0/1)
+            data['estado'] = int(data['valor'])
+
+        collection.insert_one(data)
+        print(f"Datos guardados en MongoDB para {message.topic}")
+    except Exception as e:
+        print(f"Error al procesar mensaje: {e}")
 
 # Cliente MQTT
 mqtt_client = mqtt.Client()
 mqtt_client.on_connect = on_connect
-mqtt_client.on_publish = on_publish
+mqtt_client.on_message = on_message
 
 # Conectar al broker MQTT
 mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
@@ -54,6 +72,7 @@ try:
         for tipo_dispositivo, topico in TOPICOS.items():
             registros = obtener_ultimos_registros(tipo_dispositivo)
             for registro in registros:
+                registro.pop('_id', None)  # Eliminar el campo _id de MongoDB para evitar errores de serialización
                 mensaje = json.dumps(registro, default=str)
                 mqtt_client.publish(topico, mensaje)
         time.sleep(10)  # Intervalo de tiempo entre cada envío de datos
