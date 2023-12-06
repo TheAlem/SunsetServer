@@ -1,6 +1,8 @@
 import pymongo
 import paho.mqtt.client as mqtt
 import time
+from datetime import datetime
+
 
 # Configuración de MongoDB
 MONGO_URI = "mongodb://sunset:1234@144.22.36.59:27017/sunset"
@@ -46,7 +48,8 @@ def on_message(client, userdata, message):
         try:
             data = {
                 'valor': mensaje_actual,
-                'tipo_dispositivo': topico.split('/')[-1]
+                'tipo_dispositivo': topico.split('/')[-1],
+                'fecha_hora': datetime.now()  # Añadir fecha y hora actual
             }
 
             # Lógica específica para cada tópico
@@ -62,6 +65,7 @@ def on_message(client, userdata, message):
             
         except Exception as e:
             print(f"Error al procesar mensaje: {e}")
+
 
 # Cliente MQTT
 mqtt_client = mqtt.Client()
