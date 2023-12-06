@@ -51,6 +51,7 @@ def on_message(client, userdata, message):
                 'tipo_dispositivo': topico.split('/')[-1],
                 'fecha_hora': datetime.now()  # Añadir fecha y hora actual
             }
+            
 
             # Lógica específica para cada tópico
             if data['tipo_dispositivo'] == 'iluminacion':
