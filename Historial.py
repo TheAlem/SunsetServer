@@ -1,7 +1,8 @@
-import pymongo
-import paho.mqtt.client as mqtt
 import json
 import time
+import pymongo
+import paho.mqtt.client as mqtt
+from threading import Thread, Event
 
 # Configuración de MongoDB
 MONGO_URI = "mongodb://sunset:1234@144.22.36.59:27017/sunset"
@@ -11,36 +12,29 @@ COLLECTION_NAME = "historial_acceso"
 # Configuración de MQTT
 MQTT_BROKER = "broker.hivemq.com"
 MQTT_PORT = 1883
-TOPICOS = {
-    "puerta": "jose_univalle/puerta",
-    "persianas": "jose_univalle/persianas",
-    "iluminacion": "jose_univalle/iluminacion",
-    "ventana": "jose_univalle/ventana"
-}
+TOPICOS_ENTRADA = ["jose_univalle/puerta", "jose_univalle/persianas", "jose_univalle/iluminacion", "jose_univalle/ventana"]
 
 # Cliente MongoDB
-client = pymongo.MongoClient(MONGO_URI)
-db = client[DATABASE_NAME]
+client_mongo = pymongo.MongoClient(MONGO_URI)
+db = client_mongo[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-"""""
-# Función para obtener los últimos registros por tipo de dispositivo
-def obtener_ultimos_registros(tipo_dispositivo, limit=5):
-    try:
-        registros = collection.find({'tipo_dispositivo': tipo_dispositivo}).sort("dateTime", -1).limit(limit)
-        return list(registros)
-    except Exception as e:
-        print(f"Error al obtener datos de MongoDB para {tipo_dispositivo}: {e}")
-        return []
-"""
+
+# Cliente MQTT
+client_mqtt = mqtt.Client()
+
+# Evento para controlar la ejecución de los hilos
+stop_event = Event()
+
 
 # Funciones de callback para MQTT
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, rc):
     print(f"Conectado a MQTT con el código de resultado {rc}")
-    for topico in TOPICOS.values():
+    for topico in TOPICOS_ENTRADA:
         client.subscribe(topico)
 
-def on_message(client, userdata, message):
+def on_message(message):
+    print(f"Mensaje recibido del tópico {message.topic}")
     try:
         data = dict()
         data['valor'] = str(message.payload.decode("utf-8","ignore"))
@@ -62,29 +56,31 @@ def on_message(client, userdata, message):
     except Exception as e:
         print(f"Error al procesar mensaje: {e}")
 
-# Cliente MQTT
-mqtt_client = mqtt.Client()
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
+# Configuración de callbacks MQTT
+client_mqtt.on_connect = on_connect
+client_mqtt.on_message = on_message
 
-# Conectar al broker MQTT
-mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-mqtt_client.loop_start()
+# Iniciar el bucle MQTT en un hilo separado
+def iniciar_mqtt():
+    client_mqtt.connect(MQTT_BROKER, MQTT_PORT, 60)
+    while not stop_event.is_set():
+        client_mqtt.loop(timeout=1.0)  # Ejecutar loop con un timeout
 
+# Iniciar hilo MQTT
+thread_mqtt = Thread(target=iniciar_mqtt)
+thread_mqtt.start()
+
+# Bucle principal
 try:
     while True:
-        pass
-        #for tipo_dispositivo, topico in TOPICOS.items():
-            #registros = obtener_ultimos_registros(tipo_dispositivo)
-            #for registro in registros:
-                #registro.pop('_id', None)  # Eliminar el campo _id de MongoDB para evitar errores de serialización
-                #mensaje = json.dumps(registro, default=str)
-                #mqtt_client.publish(topico, mensaje)
-        #time.sleep(10)  # Intervalo de tiempo entre cada envío de datos
+
+        time.sleep(10)
+
 except KeyboardInterrupt:
     print("Deteniendo el script...")
 
 finally:
-    mqtt_client.loop_stop()
-    mqtt_client.disconnect()
-    client.close()
+    stop_event.set()  # Indicar a los hilos que se detengan
+    thread_mqtt.join()  # Esperar a que el hilo MQTT termine
+    client_mqtt.disconnect()
+    client_mongo.close()
