@@ -1,6 +1,5 @@
 import pymongo
 import paho.mqtt.client as mqtt
-import json
 import time
 
 # Configuración de MongoDB
@@ -23,6 +22,12 @@ client = pymongo.MongoClient(MONGO_URI)
 db = client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
+# Diccionario para almacenar el último mensaje de cada tópico
+ultimo_mensaje = {topico: {"mensaje": None, "timestamp": 0} for topico in TOPICOS.values()}
+
+# Tiempo mínimo entre mensajes (en segundos)
+INTERVALO_MINIMO = 2
+
 # Funciones de callback para MQTT
 def on_connect(client, userdata, flags, rc):
     print(f"Conectado a MQTT con el código de resultado {rc}")
@@ -30,26 +35,33 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(topico)
 
 def on_message(client, userdata, message):
-    try:
-        data = dict()
-        data['valor'] = str(message.payload.decode("utf-8","ignore"))
-        tipo_dispositivo = message.topic.split('/')[-1]
-        data['tipo_dispositivo'] = tipo_dispositivo
-        
-        # Lógica específica para cada tópico
-        if tipo_dispositivo == 'iluminacion':
-            # Suponiendo que 'valor' es el campo en el mensaje para intensidad de iluminación
-            data['intensidad'] = data['valor']
-        else:
-            # Para otros tópicos que solo manejan encendido/apagado (0/1)
-            data['estado'] = data['valor']
-        
-        #print(json.dumps(data))
-        collection.insert_one(data)
-        #print(f"Datos guardados en MongoDB para {message.topic}")
-        
-    except Exception as e:
-        print(f"Error al procesar mensaje: {e}")
+    mensaje_actual = message.payload.decode("utf-8","ignore")
+    topico = message.topic
+    tiempo_actual = time.time()
+
+    # Verificar si el mensaje es diferente del último o si ha pasado suficiente tiempo
+    if mensaje_actual != ultimo_mensaje[topico]["mensaje"] or \
+        (tiempo_actual - ultimo_mensaje[topico]["timestamp"]) > INTERVALO_MINIMO:
+
+        try:
+            data = {
+                'valor': mensaje_actual,
+                'tipo_dispositivo': topico.split('/')[-1]
+            }
+
+            # Lógica específica para cada tópico
+            if data['tipo_dispositivo'] == 'iluminacion':
+                data['intensidad'] = data['valor']
+            else:
+                data['estado'] = data['valor']
+            
+            collection.insert_one(data)
+
+            # Actualizar el último mensaje y timestamp
+            ultimo_mensaje[topico] = {"mensaje": mensaje_actual, "timestamp": tiempo_actual}
+            
+        except Exception as e:
+            print(f"Error al procesar mensaje: {e}")
 
 # Cliente MQTT
 mqtt_client = mqtt.Client()
